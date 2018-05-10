@@ -4,6 +4,8 @@ from bs4 import BeautifulSoup
 from celery import Celery
 from celery.utils.log import get_logger
 from kombu import Exchange, Queue
+from celery import group
+from time import sleep
 
 logger = get_logger(__name__)
 HEADERS = {
@@ -23,7 +25,8 @@ COOKIES = {
 
 app = Celery(
     'tasks', 
-    broker='pyamqp://admin:admin@localhost//'
+    broker='pyamqp://admin:admin@172.16.0.2',
+    backend="rpc://"
 )
 app.conf.task_queues = (
     Queue('default', Exchange('default'), routing_key='default'),
@@ -44,7 +47,12 @@ def getImageUrl(url):
     res = requests.get(url, headers=HEADERS, cookies=COOKIES)
     page = BeautifulSoup(res.content)
     imageUrls = set(map(lambda x:x["href"], page.select(".gdtl a")))
-    tasks = [ downloadImage.apply_async(args=[url, ], queue="download", routing_key="download") for url in imageUrls ]
+    downloadTasks = group([downloadImage.s(url) for url in imageUrls ])
+    downloadPaths = downloadTasks.apply_async(queue="download", routing_key="download")
+    while not downloadPaths.ready():
+        logger.info("Wait for download tasks")
+        sleep(5)
+
 
 @app.task
 def downloadImage(url):
@@ -53,11 +61,13 @@ def downloadImage(url):
     imageUrl = page.select("a #img")[0]["src"]
     root_path = url.strip().split("/")[-1].strip().split("-")[0]
     image_name = imageUrl.strip().split("/")[-1]
+    downloadPath = "{0}/{1}".format(root_path, image_name)
     if not os.path.isdir(root_path):
         os.mkdir(root_path)
-    with open("{0}/{1}".format(root_path, image_name), "wb") as image_fd:
+    with open(downloadPath, "wb") as image_fd:
         imageRes = requests.get(imageUrl, headers=HEADERS, cookies=COOKIES)
         image_fd.write(imageRes.content)
+    return downloadPath
 
 
 if __name__ == '__main__':
