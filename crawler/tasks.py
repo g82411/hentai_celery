@@ -1,8 +1,11 @@
+from __future__ import absolute_import
 import requests
 import os
 from bs4 import BeautifulSoup
 from celery import Celery
+from crawler.celery import app
 from celery.utils.log import get_logger
+
 from kombu import Exchange, Queue
 from celery import group
 from time import sleep
@@ -22,28 +25,16 @@ COOKIES = {
     "ipb_member_id":"2950929",
     "igneous":"942c9e50d"
 }
-
-app = Celery(
-    'tasks', 
-    broker='pyamqp://admin:admin@172.16.0.2',
-    backend="rpc://"
-)
-app.conf.task_queues = (
-    Queue('default', Exchange('default'), routing_key='default'),
-    Queue('parsing',  Exchange('parsing'),   routing_key='parsing'),
-    Queue('download',  Exchange('download'),   routing_key='download'),
-)
-
-@app.task
-def getIndex(url):
+@app.task(bind=True)
+def getIndex(self, url):
     res = requests.get(url, headers=HEADERS , cookies=COOKIES)
     page = BeautifulSoup(res.content)
     pageUrls = set(map(lambda x:x["href"], page.select(".gtb a")))
     logger.info("This comic has {0} pages".format(len(pageUrls)))
     tasks = [ getImageUrl.apply_async([url, ], queue="parsing", routing_key="parsing") for url in pageUrls ]
 
-@app.task
-def getImageUrl(url):
+@app.task(bind=True)
+def getImageUrl(self, url):
     res = requests.get(url, headers=HEADERS, cookies=COOKIES)
     page = BeautifulSoup(res.content)
     imageUrls = set(map(lambda x:x["href"], page.select(".gdtl a")))
@@ -54,8 +45,8 @@ def getImageUrl(url):
         sleep(5)
 
 
-@app.task
-def downloadImage(url):
+@app.task(bind=True)
+def downloadImage(self, url):
     res = requests.get(url, headers=HEADERS, cookies=COOKIES)
     page = BeautifulSoup(res.content)
     imageUrl = page.select("a #img")[0]["src"]

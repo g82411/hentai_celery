@@ -20,7 +20,7 @@ services:
       - .:/app
     depends_on:
       - rabbit
-    entrypoint: celery -A crawler.tasks worker -Q default,parsing
+    entrypoint: celery -A celery worker -Q default,parsing
     networks:
       - worker_net
   downloader:
@@ -32,7 +32,7 @@ services:
       - .:/app
     depends_on:
       - rabbit
-    entrypoint: celery -A crawler.tasks worker -Q download --concurrency=20
+    entrypoint: celery -A celery worker -Q download --concurrency=20
     networks:
       - worker_net
 networks:
